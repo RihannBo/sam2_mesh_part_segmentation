@@ -1,0 +1,384 @@
+# @package _global_
+
+scratch:
+  resolution: 1024
+  train_batch_size: 1
+  num_train_workers: 6
+  num_frames: 12
+  max_num_objects: 5
+  base_lr: 5.0e-6  # Reduced from 1.0e-5 (50% reduction) for stable convergence after resuming
+  vision_lr: 2.5e-6  # Reduced from 5.0e-6 (50% reduction)
+  phases_per_epoch: 1
+  num_epochs: 100  # Increased total epochs to allow fine-tuning from best checkpoint
+  warmup_steps: 200  # Reduced warmup since we're resuming from a trained checkpoint (was 1000)
+
+
+data:
+  train:
+    _target_: seg3d.dataset.mesh_dataset_loader.MeshDatasetWithLoader
+    dataset_root: /home/mengnan/seg3d/training_dataset
+    split: train
+    train_ratio: 0.8
+    split_seed: 42
+
+    num_views: 12
+    batch_size: ${scratch.train_batch_size}
+    num_workers: 4
+    shuffle: True
+    pin_memory: True
+    drop_last: True
+
+    # GeoSAM2-style bootstrapping
+    bootstrap_first_frame: true
+    bootstrap_repeat: 1
+    dict_key: all
+
+  val:
+    _target_: seg3d.dataset.mesh_dataset_loader.MeshDatasetWithLoader
+    dataset_root: /home/mengnan/seg3d/training_dataset
+    split: val
+    train_ratio: 0.8
+    split_seed: 42
+
+    num_views: 12
+    batch_size: 1
+    num_workers: 2
+    shuffle: False
+    pin_memory: True
+    drop_last: False
+
+    bootstrap_first_frame: True
+    bootstrap_repeat: 1
+    dict_key: all
+
+
+
+trainer:
+  _target_: seg3d.training.multiview_trainer.MultiViewSAM2Trainer
+  mode: train_only
+  max_epochs: ${times:${scratch.num_epochs},${scratch.phases_per_epoch}}
+  accelerator: cuda
+  seed_value: 123
+  # Early stopping: stop training if validation loss doesn't improve for N epochs
+  # Set to null/None to disable early stopping
+  early_stop_patience: 20  # Stop if no improvement for 20 epochs
+  # Multi-instance training: number of instances per training step (K) for episodic instance training
+  num_instances_per_step: 3  # Number of instances to sample and process per training step
+
+  dict_key: all
+
+  model:
+    _target_: seg3d.training.model.multiview_sam2.MultiViewSAM2Train
+    image_encoder:
+      _target_: seg3d.testing.multimodal_encoder.GeoSAM2MultimodalEncoder
+      use_gradient_checkpointing: true  # Enable gradient checkpointing to save memory
+      sam_img_encoder:
+        _target_: sam2.modeling.backbones.image_encoder.ImageEncoder
+        scalp: 1
+        trunk:
+          _target_: sam2.modeling.backbones.hieradet.Hiera
+          embed_dim: 144
+          num_heads: 2
+          stages: [2, 6, 36, 4]
+          global_att_blocks: [23, 33, 43]
+          window_pos_embed_bkg_spatial_size: [7, 7]
+          window_spec: [8, 4, 16, 8]
+          drop_path_rate: 0.1
+        neck:
+          _target_: sam2.modeling.backbones.image_encoder.FpnNeck
+          position_encoding:
+            _target_: sam2.modeling.position_encoding.PositionEmbeddingSine
+            num_pos_feats: 256
+            normalize: true
+            scale: null
+            temperature: 10000
+          d_model: 256
+          backbone_channel_list: [1152, 576, 288, 144]
+          fpn_top_down_levels: [2, 3]  # output level 0 and 1 directly use the backbone features
+          fpn_interp_model: nearest
+
+    memory_attention:
+      _target_: sam2.modeling.memory_attention.MemoryAttention
+      d_model: 256
+      pos_enc_at_input: true
+      layer:
+        _target_: sam2.modeling.memory_attention.MemoryAttentionLayer
+        activation: relu
+        dim_feedforward: 2048
+        dropout: 0.1
+        pos_enc_at_attn: false
+        self_attention:
+          _target_: sam2.modeling.sam.transformer.RoPEAttention
+          rope_theta: 10000.0
+          feat_sizes: [64, 64]
+          embedding_dim: 256
+          num_heads: 1
+          downsample_rate: 1
+          dropout: 0.1
+        d_model: 256
+        pos_enc_at_cross_attn_keys: true
+        pos_enc_at_cross_attn_queries: false
+        cross_attention:
+          _target_: sam2.modeling.sam.transformer.RoPEAttention
+          rope_theta: 10000.0
+          feat_sizes: [64, 64]
+          rope_k_repeat: True
+          embedding_dim: 256
+          num_heads: 1
+          downsample_rate: 1
+          dropout: 0.1
+          kv_in_dim: 64
+      num_layers: 4
+
+    memory_encoder:
+        _target_: sam2.modeling.memory_encoder.MemoryEncoder
+        out_dim: 64
+        position_encoding:
+          _target_: sam2.modeling.position_encoding.PositionEmbeddingSine
+          num_pos_feats: 64
+          normalize: true
+          scale: null
+          temperature: 10000
+        mask_downsampler:
+          _target_: sam2.modeling.memory_encoder.MaskDownSampler
+          kernel_size: 3
+          stride: 2
+          padding: 1
+        fuser:
+          _target_: sam2.modeling.memory_encoder.Fuser
+          layer:
+            _target_: sam2.modeling.memory_encoder.CXBlock
+            dim: 256
+            kernel_size: 7
+            padding: 3
+            layer_scale_init_value: 1e-6
+            use_dwconv: True  # depth-wise convs
+          num_layers: 2
+
+    num_maskmem: 7
+    image_size: ${scratch.resolution}
+    # Limit the number of conditioning frames in memory attention to avoid OOM
+    # This limits memory usage in the transformer encoder when tracking each frame
+    max_cond_frames_in_attn: 3  # Limit to 3 most recent conditioning frames (reduces memory significantly)
+    # apply scaled sigmoid on mask logits for memory encoder, and directly feed input mask as output mask
+    sigmoid_scale_for_mem_enc: 20.0
+    sigmoid_bias_for_mem_enc: -10.0
+    use_mask_input_as_output_without_sam: true
+    # Memory
+    directly_add_no_mem_embed: true
+    no_obj_embed_spatial: true
+    # use high-resolution feature map in the SAM mask decoder
+    use_high_res_features_in_sam: True
+    # output 3 masks on the first click on initial conditioning frames
+    multimask_output_in_sam: true
+    # SAM heads
+    iou_prediction_use_sigmoid: True
+    # cross-attend to object pointers from other frames (based on SAM output tokens) in the encoder
+    use_obj_ptrs_in_encoder: true
+    add_tpos_enc_to_obj_ptrs: true
+    proj_tpos_enc_in_obj_ptrs: true
+    use_signed_tpos_enc_to_obj_ptrs: true
+    only_obj_ptrs_in_the_past_for_eval: true
+    # object occlusion prediction
+    pred_obj_scores: true
+    pred_obj_scores_mlp: true
+    fixed_no_obj_ptr: true
+    # multimask tracking settings
+    multimask_output_for_tracking: false  # Disabled to save memory during tracking (multimask still used on initial frames)
+    use_multimask_token_for_obj_ptr: true
+    multimask_min_pt_num: 0
+    multimask_max_pt_num: 1
+    use_mlp_for_obj_ptr_proj: true
+    # Compilation flag
+    # compile_image_encoder: False
+
+    ####### Training specific params #######
+    # Mixed prompt training (recommended for best generalization):
+    # Distribution: ~70% boxes, ~20% points, ~10% masks
+    # Rationale:
+    #   - Boxes: SAM2's primary training mode, better spatial context, efficient (2 points)
+    #   - Points: More realistic inference, improves robustness to sparse prompts
+    #   - Masks: Strong supervision signal, prevents overfitting to sparse prompts
+    # Calculation:
+    #   - prob_to_use_pt_input = 0.9 → 90% prompts, 10% masks
+    #   - prob_to_use_box_input = 0.778 → 77.8% boxes, 22.2% points (of the 90%)
+    #   - Final: 70% boxes, 20% points, 10% masks
+    prob_to_use_pt_input_for_train: 0.9  # 90% use point/box prompts, 10% use mask prompts
+    prob_to_use_pt_input_for_eval: 0.0  # Eval: use mask inputs only
+    prob_to_use_box_input_for_train: 0.778  # When using prompts: ~78% boxes, ~22% points
+    prob_to_use_box_input_for_eval: 0.0
+    # Correction/refinement disabled for non-interactive training
+    prob_to_sample_from_gt_for_train: 0.0
+    num_frames_to_correct_for_train: 1  # Must be >= num_init_cond_frames_for_train (assertion requirement)
+    num_frames_to_correct_for_eval: 1
+    rand_frames_to_correct_for_train: False
+    add_all_frames_to_correct_as_cond: False
+    # Use only 1 initial conditioning frame (frame 0 for prompt)
+    num_init_cond_frames_for_train: 1
+    rand_init_cond_frames_for_train: False  # Always use frame 0
+    num_correction_pt_per_frame: 0  # Disabled - no correction points
+    use_act_ckpt_iterative_pt_sampling: false  # Not needed since no correction
+    #forward_backbone_per_frame_for_train: True  # Process frames one at a time during training to save memory
+    #backbone_chunk_size_for_train: 4  # Process N frames together (1=one-by-one, 4=chunks of 4, -1=all at once)
+    
+    num_init_cond_frames_for_eval: 1  # only mask on the first frame
+    forward_backbone_per_frame_for_eval: True
+    forward_backbone_per_frame_for_train: True  # Enabled to avoid CUDA OOM errors
+    #backbone_chunk_size_for_eval: 1  # Same for eval (keep 1 for memory safety)
+    
+    # IoU heads training
+    train_iou_heads: true  # If True, unfreeze IoU prediction heads (iou_token + iou_prediction_head) for training
+    
+    # Multi-instance training with chunking and bbox prompts
+    #use_bbox_prompts_from_gt: true  # If True, use bounding boxes from GT masks in first frame as prompts (multi-instance training)
+    #max_instances_per_batch: 3  # Maximum number of instances to process in one batch (fallback if num_instances_per_step not set)
+    # Prompt type configuration (to prevent overfitting)
+    # Recommendation: 'box_with_noise' is better for multi-instance segmentation because:
+    # - Boxes provide better spatial context for object boundaries
+    # - SAM2 was primarily trained with boxes as prompts
+    # - More efficient (2 points vs 3+ points)
+    # - With noise, prevents overfitting while maintaining box structure
+    #prompt_type: box_with_noise  # Options: 'box_with_noise' (recommended) or 'random_points'
+    #box_prompt_noise: 0.1  # Noise level for box prompts (0.0=perfect box, 0.1=10% jitter, helps prevent overfitting)
+    #num_random_points: 3  # Number of random points (only used if prompt_type='random_points')
+    #prob_use_random_points: 0.3  # Not used when prompt_type is not 'mixed'
+
+
+  optim:
+    amp:
+      enabled: True
+      amp_dtype: bfloat16
+
+    optimizer:
+      _target_: torch.optim.AdamW
+
+    gradient_clip:
+      _target_: training.optimizer.GradientClipper
+      max_norm: 0.1
+      norm_type: 2
+
+    param_group_modifiers:
+      - _target_: training.optimizer.layer_decay_param_modifier
+        _partial_: True
+        layer_decay_value: 0.9
+        apply_to: 'image_encoder.trunk'
+        overrides:
+          - pattern: '*pos_embed*'
+            value: 1.0
+
+    options:
+      lr:
+        # Base LR: Warmup + Cosine annealing
+        # Using CompositeParamScheduler with lengths (fractions of total training based on where parameter)
+        # warmup_steps=200, estimated ~160 steps/epoch, 100 epochs = ~16000 total steps
+        # warmup_fraction ≈ 200/16000 ≈ 0.0125 (1.25%), cosine_fraction ≈ 0.9875 (98.75%)
+        # Reduced warmup since we're resuming from trained checkpoint (epoch 23)
+        - scheduler:
+            _target_: fvcore.common.param_scheduler.CompositeParamScheduler
+            schedulers:
+              # Linear warmup: 0 -> base_lr during warmup phase (first ~7.8% of training)
+              - _target_: fvcore.common.param_scheduler.LinearParamScheduler
+                start_value: 0.0
+                end_value: ${scratch.base_lr}
+              # Cosine annealing: base_lr -> base_lr/10 after warmup (remaining ~92.2% of training)
+              - _target_: fvcore.common.param_scheduler.CosineParamScheduler
+                start_value: ${scratch.base_lr}
+                end_value: ${divide:${scratch.base_lr},10}
+            lengths: [0.0125, 0.9875]  # Warmup: 1.25% of training, Cosine: 98.75% of training (reduced warmup for resume)
+        # Vision encoder LR: Warmup + Cosine annealing (lower LR for image_encoder)
+        - scheduler:
+            _target_: fvcore.common.param_scheduler.CompositeParamScheduler
+            schedulers:
+              # Linear warmup: 0 -> vision_lr during warmup phase
+              - _target_: fvcore.common.param_scheduler.LinearParamScheduler
+                start_value: 0.0
+                end_value: ${scratch.vision_lr}
+              # Cosine annealing: vision_lr -> vision_lr/10 after warmup
+              - _target_: fvcore.common.param_scheduler.CosineParamScheduler
+                start_value: ${scratch.vision_lr}
+                end_value: ${divide:${scratch.vision_lr},10}
+            lengths: [0.0125, 0.9875]  # Warmup: 1.25% of training, Cosine: 98.75% of training (reduced warmup for resume)
+          param_names:
+            - 'image_encoder.*'
+      weight_decay:
+        - scheduler:
+            _target_: fvcore.common.param_scheduler.ConstantParamScheduler
+            value: 0.1
+        - scheduler:
+            _target_: fvcore.common.param_scheduler.ConstantParamScheduler
+            value: 0.0
+          param_names:
+            - '*bias*'
+          # Note: module_cls_names removed - model doesn't have LayerNorm modules or they're frozen
+
+  loss:
+    all:
+      _target_: training.loss_fns.MultiStepMultiMasksAndIous
+      weight_dict:
+        loss_mask: 20
+        loss_dice: 1
+        loss_iou: 1
+        loss_class: 1
+      supervise_all_iou: true
+      iou_use_l1_loss: true
+      pred_obj_scores: true
+      focal_gamma_obj_score: 0.0
+      focal_alpha_obj_score: -1.0
+
+  distributed:
+    backend: nccl
+    find_unused_parameters: True
+
+  logging:
+    tensorboard_writer:
+      _target_: training.utils.logger.make_tensorboard_logger
+      log_dir:  ${launcher.experiment_log_dir}/tensorboard
+      flush_secs: 120
+      should_log: True
+    log_dir: ${launcher.experiment_log_dir}/logs
+    log_freq: 200
+    log_level_primary: WARNING
+    log_level_secondary: ERROR
+    log_scalar_frequency: 1000
+    log_visual_frequency: 1000
+    use_tqdm: true
+    tqdm_mininterval: 1.0
+
+  # initialize from a SAM 2 checkpoint
+  checkpoint:
+    save_dir: /home/mengnan/seg3d/checkpoints  # Fixed path (was ${launcher.experiment_log_dir}/checkpoints which resolved to None/checkpoints)
+    save_freq: 0 # 0 only last checkpoint is saved.
+    model_weight_initializer:
+      _partial_: True
+      _target_: training.utils.checkpoint_utils.load_state_dict_into_model
+      strict: False  # Set to False to allow key mapping for nested encoder structure
+      # Ignore unexpected keys (checkpoint has .base_layer keys but model doesn't use them)
+      ignore_unexpected_keys: ['*.base_layer.*', 'image_encoder.loras.*', 'image_encoder.fusion.*']
+      # Ignore missing keys (LoRA and fusion are randomly initialized, not loaded from checkpoint)
+      ignore_missing_keys: ['image_encoder.loras.*', 'image_encoder.fusion.*', '*.base_layer.*']
+
+      state_dict:
+        _target_: training.utils.checkpoint_utils.load_checkpoint_and_apply_kernels
+        checkpoint_path: /home/mengnan/seg3d/sam2/checkpoints/sam2.1_hiera_large.pt # PATH to SAM 2.1 checkpoint
+        ckpt_state_dict_keys: ['model']
+        checkpoint_kernels:
+          - _target_: training.utils.checkpoint_utils.CkptKeyMapperKernel
+            key_mapping:
+              "image_encoder.trunk": "image_encoder.sam_img_encoder.trunk"
+              "image_encoder.neck": "image_encoder.sam_img_encoder.neck"
+
+launcher:
+  num_nodes: 1
+  gpus_per_node: 8
+  experiment_log_dir: null # Path to log directory, defaults to ./sam2_logs/${config_name}
+
+# SLURM args if running on a cluster
+submitit:
+  partition: null
+  account: null
+  qos: null
+  cpus_per_task: 10
+  use_cluster: false
+  timeout_hour: 24
+  name: null
+  port_range: [10000, 65000]
