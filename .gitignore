@@ -1,0 +1,51 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs & local outputs
+*.log
+logs/
+outputs/
+checkpoints/
+wandb/
+.pytest_cache/
+.ruff_cache/
+
+# Large third-party weights (download separately)
+sam2/checkpoints/*.pt
+sam2/checkpoints/*.pth
+sam2/checkpoints/*.bin
+sam2/checkpoints/*.ckpt
+sam2/.git/
+
+# Datasets (keep local; download separately)
+princeton/
+COSEG/
+None/
+training_dataset/
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Env secrets
+.env
+.env.*
