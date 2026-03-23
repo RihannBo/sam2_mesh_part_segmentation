@@ -1,0 +1,25 @@
+Model,View,Mean IoU,Std IoU
+Dual (Normal+Point) + Geo-aware mem (GT prompts),0,81.05241060256958,17.57117548828644
+Dual (Normal+Point) + Geo-aware mem (GT prompts),1,64.74758520722389,21.540588889737304
+Dual (Normal+Point) + Geo-aware mem (GT prompts),2,60.42747851461172,22.827003167481095
+Dual (Normal+Point) + Geo-aware mem (GT prompts),3,54.332962706685066,20.403540477231598
+Dual (Normal+Point) + Geo-aware mem (GT prompts),4,54.333354234695435,19.864707708667808
+Dual (Normal+Point) + Geo-aware mem (GT prompts),5,60.683845207095146,19.958530945651564
+Dual (Normal+Point) + Geo-aware mem (GT prompts),6,62.14414577931166,19.503489540516053
+Dual (Normal+Point) + Geo-aware mem (GT prompts),7,51.54918882995844,19.635074787225882
+Dual (Normal+Point) + Geo-aware mem (GT prompts),8,51.24417845159769,17.007039291350367
+Dual (Normal+Point) + Geo-aware mem (GT prompts),9,50.42067747563124,16.272925105422193
+Dual (Normal+Point) + Geo-aware mem (GT prompts),10,47.8786901012063,15.716332928218185
+Dual (Normal+Point) + Geo-aware mem (GT prompts),11,47.17671446502209,16.26999005438205
+Dual (Normal+Point) + Geo-aware mem (AMG prompts),0,34.30042799562216,19.894379667558074
+Dual (Normal+Point) + Geo-aware mem (AMG prompts),1,33.96932831034064,19.979101428658975
+Dual (Normal+Point) + Geo-aware mem (AMG prompts),2,34.10451764240861,20.068859701762353
+Dual (Normal+Point) + Geo-aware mem (AMG prompts),3,31.463204324245453,18.432282839974437
+Dual (Normal+Point) + Geo-aware mem (AMG prompts),4,31.318688485771418,18.50659634948762
+Dual (Normal+Point) + Geo-aware mem (AMG prompts),5,32.7326481230557,18.749966196078233
+Dual (Normal+Point) + Geo-aware mem (AMG prompts),6,33.45040747895837,18.404464239908947
+Dual (Normal+Point) + Geo-aware mem (AMG prompts),7,29.567032605409622,15.051327064590186
+Dual (Normal+Point) + Geo-aware mem (AMG prompts),8,29.78015004657209,15.004456380260114
+Dual (Normal+Point) + Geo-aware mem (AMG prompts),9,29.134427183307707,13.393767554957831
+Dual (Normal+Point) + Geo-aware mem (AMG prompts),10,27.679590694606304,15.711460365910932
+Dual (Normal+Point) + Geo-aware mem (AMG prompts),11,30.288719832897186,17.2011153897945

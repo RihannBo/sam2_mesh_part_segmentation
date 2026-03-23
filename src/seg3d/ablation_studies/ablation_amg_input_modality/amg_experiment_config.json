@@ -1,0 +1,60 @@
+{
+  "experiment_name": "AMG Modality Ablation",
+  "dataset_path": "/home/mengnan/seg3d/training_dataset",
+  "num_meshes": 200,
+  "num_views": 12,
+  "sam_checkpoint": "/home/mengnan/seg3d/sam2/checkpoints/sam2.1_hiera_large.pt",
+  "model_config": "configs/sam2.1/sam2.1_hiera_l.yaml",
+  "amg_parameters": {
+    "points_per_side": 128,
+    "pred_iou_thresh": 0.85,
+    "stability_score_thresh": 0.85,
+    "stability_score_offset": 1.0,
+    "min_mask_region_area": 300,
+    "box_nms_thresh": 0.7,
+    "crop_nms_thresh": 0.5,
+    "crop_n_layers": 0,
+    "use_m2m": false,
+    "multimask_output": true
+  },
+  "evaluation_start_time": "2026-03-11T21:17:55.352536",
+  "evaluation_end_time": "2026-03-12T06:06:06.027600",
+  "total_runtime_seconds": 31690.675061941147,
+  "average_runtime_per_mesh_seconds": 158.3077721631527,
+  "summary_metrics": {
+    "normal": {
+      "Modality": "normal",
+      "Mean_IoU": 0.37570380325073466,
+      "Std_IoU": 0.19969884576554686,
+      "Mean_Dice": 0.4324758637623056,
+      "Std_Dice": 0.20493489948397564,
+      "Num_Meshes": 200,
+      "Avg_GT_Instances": 8.11,
+      "Avg_Predicted_Masks": 8.92,
+      "Avg_Mesh_Runtime": 158.3077721631527
+    },
+    "point": {
+      "Modality": "point",
+      "Mean_IoU": 0.3066170242376876,
+      "Std_IoU": 0.19589299168868052,
+      "Mean_Dice": 0.3633296685029126,
+      "Std_Dice": 0.2015673469558421,
+      "Num_Meshes": 200,
+      "Avg_GT_Instances": 8.11,
+      "Avg_Predicted_Masks": 6.755,
+      "Avg_Mesh_Runtime": 158.3077721631527
+    },
+    "matte": {
+      "Modality": "matte",
+      "Mean_IoU": 0.3764897497577359,
+      "Std_IoU": 0.20311690349133454,
+      "Mean_Dice": 0.43034889581837055,
+      "Std_Dice": 0.20780107060689115,
+      "Num_Meshes": 200,
+      "Avg_GT_Instances": 8.11,
+      "Avg_Predicted_Masks": 8.97,
+      "Avg_Mesh_Runtime": 158.3077721631527
+    }
+  },
+  "created_at": "2026-03-12T06:06:06.027692"
+}
